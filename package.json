@@ -1,0 +1,22 @@
+{
+  "name": "big2-multiplayer-server",
+  "version": "1.0.0",
+  "description": "Currently creating Big 2 using HTML, vanilla JavaScript, and CSS.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zun69/big2-multiplayer-server.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Zun69/big2-multiplayer-server/issues"
+  },
+  "homepage": "https://github.com/Zun69/big2-multiplayer-server#readme",
+  "dependencies": {
+    "socket.io": "^4.7.5"
+  }
+}
