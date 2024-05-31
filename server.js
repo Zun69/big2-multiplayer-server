@@ -54,14 +54,20 @@ io.use((socket, next) => {
     const { username, password } = socket.handshake.auth;
 
     if (validCredentials[username] === password) {
+        console.log('Authentication successful');
         return next();
     } else {
-        return next(new Error('Authentication failed.'));
+        console.log('Authentication failed');
+        return next(new Error('Authentication failed'));
     }
 });
 
 io.on('connection', (socket) => {
-    console.log('A client has connected.');
+    // Handle successful authentication
+    socket.emit('authenticated');
+
+    // Log the socket ID when a client connects
+    console.log(`Client connected: ${socket.id}`);
 
     socket.on('joinRoom', (data) => {
         const { roomCode } = data;
@@ -79,6 +85,12 @@ io.on('connection', (socket) => {
     // Handle errors in connection logic
     socket.on('error', (err) => {
         console.error('Socket error:', err);
+    });
+
+    // Listen for disconnect event
+    socket.on('disconnect', () => {
+        console.log(`Client disconnected: ${socket.id}`);
+        // You can perform cleanup or additional tasks here if needed
     });
 });
 
