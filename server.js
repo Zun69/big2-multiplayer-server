@@ -75,7 +75,11 @@ io.on('connection', (socket) => {
         if (roomCode && rooms[roomCode]) {
             // Join the room if the code is valid
             socket.join(roomCode);
-            console.log(`Client joined room ${roomCode}`);
+
+            console.log(`Client: ${socket.id} joined room ${roomCode}`);
+
+            // Notify the client that joining was successful
+            socket.emit('joinedRoom');
         } else {
             // Send an error message if the code is invalid
             socket.emit('errorMessage', 'Invalid room code');
