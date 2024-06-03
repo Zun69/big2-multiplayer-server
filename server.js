@@ -25,6 +25,9 @@ function generateRoomCode() {
 const rooms = {};
 const MAX_CLIENTS_PER_ROOM = 4;
 
+// Create a map to store the mapping of username to socket ID
+const usernameToSocketIdMap = new Map();
+
 // Automatically generate room codes when the server starts
 const initialRoomCode1 = generateRoomCode();
 const initialRoomCode2 = generateRoomCode();
@@ -57,6 +60,7 @@ io.use((socket, next) => {
     const { username, password } = socket.handshake.auth;
 
     if (validCredentials[username] === password) {
+        socket.username = username;
         console.log('Authentication successful');
         return next();
     } else {
@@ -69,10 +73,14 @@ io.on('connection', (socket) => {
     // Handle successful authentication
     socket.emit('authenticated');
 
-    // Log the socket ID when a client connects
-    console.log(`Client connected: ${socket.id}`);
+    // Log the socket ID and username when a client connects
+    console.log(`Client connected: ${socket.id}, Username: ${socket.username}`);
+
+    // Store the mapping of username to socket ID
+    usernameToSocketIdMap.set(socket.username, socket.id);
 
     socket.on('joinRoom', (data) => {
+        // Extracting roomCode data object
         const { roomCode } = data;
 
         if (roomCode && rooms[roomCode]) {
@@ -83,7 +91,7 @@ io.on('connection', (socket) => {
                 // Join the room if the code is valid and the room is not full
                 socket.join(roomCode);
 
-                console.log(`Client: ${socket.id} joined room ${roomCode}`);
+                console.log(`Client: ${socket.username} (${socket.id}) joined room ${roomCode}`);
 
                 // Notify the client that joining was successful
                 socket.emit('joinedRoom');
@@ -118,8 +126,11 @@ io.on('connection', (socket) => {
 
     // Listen for disconnect event
     socket.on('disconnect', () => {
-        console.log(`Client disconnected: ${socket.id}`);
-        // You can perform cleanup or additional tasks here if needed
+        // Log the disconnection
+        console.log(`Client disconnected: ${socket.username} (${socket.id})`);
+        
+        // Remove the mapping of username to socket ID when a client disconnects
+        usernameToSocketIdMap.delete(socket.username);
     });
 });
 
