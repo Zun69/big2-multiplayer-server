@@ -79,6 +79,9 @@ io.on('connection', (socket) => {
     // Store the mapping of username to socket ID
     usernameToSocketIdMap.set(socket.username, socket.id);
 
+    // Emit the usernameToSocketIdMap to the client
+    socket.emit('clientList', Array.from(usernameToSocketIdMap.keys()));
+
     socket.on('joinRoom', (data) => {
         // Extracting roomCode data object
         const { roomCode } = data;
