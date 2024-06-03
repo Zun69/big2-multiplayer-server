@@ -23,11 +23,14 @@ function generateRoomCode() {
 
 // Store room codes and corresponding sockets
 const rooms = {};
+const MAX_CLIENTS_PER_ROOM = 4;
 
-// Automatically generate a room code when the server starts
-const initialRoomCode = generateRoomCode();
-rooms[initialRoomCode] = true;
-console.log('Automatically generated room code:', initialRoomCode);
+// Automatically generate room codes when the server starts
+const initialRoomCode1 = generateRoomCode();
+const initialRoomCode2 = generateRoomCode();
+rooms[initialRoomCode1] = true;
+rooms[initialRoomCode2] = true;
+console.log('Automatically generated room codes:', initialRoomCode1, initialRoomCode2);
 
 // Read valid credentials from a text file
 const fs = require('fs');
@@ -71,19 +74,41 @@ io.on('connection', (socket) => {
 
     socket.on('joinRoom', (data) => {
         const { roomCode } = data;
-        
+
         if (roomCode && rooms[roomCode]) {
-            // Join the room if the code is valid
-            socket.join(roomCode);
+            const room = io.sockets.adapter.rooms.get(roomCode);
+            const numClients = room ? room.size : 0;
 
-            console.log(`Client: ${socket.id} joined room ${roomCode}`);
+            if (numClients < MAX_CLIENTS_PER_ROOM) {
+                // Join the room if the code is valid and the room is not full
+                socket.join(roomCode);
 
-            // Notify the client that joining was successful
-            socket.emit('joinedRoom');
+                console.log(`Client: ${socket.id} joined room ${roomCode}`);
+
+                // Notify the client that joining was successful
+                socket.emit('joinedRoom');
+            } else {
+                // Send an error message if the room is full
+                socket.emit('errorMessage', 'Room is full');
+            }
         } else {
             // Send an error message if the code is invalid
             socket.emit('errorMessage', 'Invalid room code');
         }
+    });
+
+    // event listener for getting available rooms
+    socket.on('getAvailableRooms', () => {
+        const availableRooms = [];
+        
+        for (const roomCode in rooms) {
+            if (rooms.hasOwnProperty(roomCode)) {
+                const numClients = io.sockets.adapter.rooms.get(roomCode)?.size || 0;
+                availableRooms.push({ roomCode, numClients });
+            }
+        }
+    
+        socket.emit('availableRooms', availableRooms);
     });
 
     // Handle errors in connection logic
