@@ -77,10 +77,7 @@ io.on('connection', (socket) => {
     console.log(`Client connected: ${socket.id}, Username: ${socket.username}`);
 
     // Store the mapping of username to socket ID
-    usernameToSocketIdMap.set(socket.username, socket.id);
-
-    // Emit the usernameToSocketIdMap to the client
-    socket.emit('clientList', Array.from(usernameToSocketIdMap.keys()));
+    usernameToSocketIdMap.set(socket.id, socket.username);
 
     socket.on('joinRoom', (data) => {
         // Extracting roomCode data object
@@ -95,7 +92,7 @@ io.on('connection', (socket) => {
                 socket.join(roomCode);
 
                 console.log(`Client: ${socket.username} (${socket.id}) joined room ${roomCode}`);
-
+                
                 // Notify the client that joining was successful
                 socket.emit('joinedRoom');
             } else {
@@ -107,6 +104,7 @@ io.on('connection', (socket) => {
             socket.emit('errorMessage', 'Invalid room code');
         }
     });
+    
 
     // event listener for getting available rooms
     socket.on('getAvailableRooms', () => {
@@ -120,6 +118,35 @@ io.on('connection', (socket) => {
         }
     
         socket.emit('availableRooms', availableRooms);
+    });
+
+    // Handle the request for an updated client list
+    socket.on('getClientList', ({ roomCode }) => {
+        if (roomCode) {
+            const room = io.sockets.adapter.rooms.get(roomCode);
+            if (room) {
+                // Retrieve socket IDs in the room
+                const socketIds = Array.from(room);
+
+                // Map socket IDs to usernames and socket IDs
+                const clients = socketIds.map(socketId => {
+                    const username = usernameToSocketIdMap.get(socketId);
+                    return { username, socketId };
+                }).filter(client => client.username !== undefined);
+
+                // Emit the current client list with usernames and socket IDs for the specified room back to the client
+                socket.emit('clientList', clients);
+            }
+        }
+    });
+
+    // Handle sending messages
+    socket.on('sendMessage', ({ roomCode, message }) => {
+        const username = usernameToSocketIdMap.get(socket.id);
+        if (roomCode && message && username) {
+            // Broadcast the message to all clients in the room
+            io.to(roomCode).emit('receiveMessage', `${username}: ${message}`);
+        }
     });
 
     // Handle errors in connection logic
