@@ -1,3 +1,6 @@
+// Import required classes
+import GameState from './'
+
 const http = require('http');
 const express = require('express');
 const socketIo = require('socket.io');
@@ -146,6 +149,26 @@ io.on('connection', (socket) => {
         if (roomCode && message && username) {
             // Broadcast the message to all clients in the room
             io.to(roomCode).emit('receiveMessage', `${username}: ${message}`);
+        }
+    });
+
+    // Handle readyUp event
+    socket.on('readyUp', ({ roomCode }) => {
+        const room = io.sockets.adapter.rooms.get(roomCode);
+        if (room && room.size === MAX_CLIENTS_PER_ROOM) {
+            // Retrieve socket IDs in the room
+            const socketIds = Array.from(room);
+
+            // Map socket IDs to usernames and assign a number (0-3)
+            const clientsWithNumbers = socketIds.map((socketId, index) => {
+                const username = usernameToSocketIdMap.get(socketId);
+                return { username, socketId, number: index };
+            });
+
+            // Emit the client list with numbers to the room
+            io.to(roomCode).emit('startGame', clientsWithNumbers);
+        } else {
+            socket.emit('errorMessage', '4 players required to start the game.');
         }
     });
 
