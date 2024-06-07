@@ -11,4 +11,5 @@ class GameState {
       this.playedHand = playedHand; //storing last played hand length
     }
   }
-  export default GameState;
+  
+  module.exports = GameState;

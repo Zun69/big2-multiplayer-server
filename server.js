@@ -1,6 +1,3 @@
-// Import required classes
-import GameState from './'
-
 const http = require('http');
 const express = require('express');
 const socketIo = require('socket.io');
@@ -8,6 +5,7 @@ const cors = require('cors'); //allow cross origin requests
 
 const app = express();
 const server = http.createServer(app);
+const GameState = require('./src/js/gameState.js'); // Assuming this is your module
 
 // Use CORS middleware
 app.use(cors());
@@ -95,9 +93,14 @@ io.on('connection', (socket) => {
                 socket.join(roomCode);
 
                 console.log(`Client: ${socket.username} (${socket.id}) joined room ${roomCode}`);
+                const client = { id: socket.id, username: socket.username, isReady: false };
+                rooms[roomCode].clients.push(client);
                 
                 // Notify the client that joining was successful
                 socket.emit('joinedRoom');
+
+                // Broadcast the updated client list to the room
+                io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
             } else {
                 // Send an error message if the room is full
                 socket.emit('errorMessage', 'Room is full');
@@ -152,24 +155,16 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Handle readyUp event
-    socket.on('readyUp', ({ roomCode }) => {
-        const room = io.sockets.adapter.rooms.get(roomCode);
-        if (room && room.size === MAX_CLIENTS_PER_ROOM) {
-            // Retrieve socket IDs in the room
-            const socketIds = Array.from(room);
+    // Handle toggleReadyState event
+    socket.on('toggleReadyState', ({ roomCode, isReady }) => {
+        if (!rooms[roomCode]) return;
 
-            // Map socket IDs to usernames and assign a number (0-3)
-            const clientsWithNumbers = socketIds.map((socketId, index) => {
-                const username = usernameToSocketIdMap.get(socketId);
-                return { username, socketId, number: index };
-            });
-
-            // Emit the client list with numbers to the room
-            io.to(roomCode).emit('startGame', clientsWithNumbers);
-        } else {
-            socket.emit('errorMessage', '4 players required to start the game.');
+        const client = rooms[roomCode].clients.find(client => client.id === socket.id);
+        if (client) {
+            client.isReady = isReady;
         }
+
+        io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
     });
 
     // Handle errors in connection logic
@@ -184,6 +179,11 @@ io.on('connection', (socket) => {
         
         // Remove the mapping of username to socket ID when a client disconnects
         usernameToSocketIdMap.delete(socket.username);
+        
+        for (let roomCode in rooms) {
+            rooms[roomCode].clients = rooms[roomCode].clients.filter(client => client.id !== socket.id);
+            io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
+        }
     });
 });
 
