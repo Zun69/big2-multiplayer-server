@@ -5,7 +5,8 @@ const cors = require('cors'); //allow cross origin requests
 
 const app = express();
 const server = http.createServer(app);
-const GameState = require('./src/js/gameState.js'); // Assuming this is your module
+const GameState = require('./src/js/gameState.js'); // import objects to server
+const Deck = require('./src/js/deck.js')
 
 // Use CORS middleware
 app.use(cors());
@@ -32,8 +33,8 @@ const usernameToSocketIdMap = new Map();
 // Automatically generate room codes when the server starts
 const initialRoomCode1 = generateRoomCode();
 const initialRoomCode2 = generateRoomCode();
-rooms[initialRoomCode1] = true;
-rooms[initialRoomCode2] = true;
+rooms[initialRoomCode1] = { clients: [] }; // Initialize with an empty clients array (for storing client's ready state)
+rooms[initialRoomCode2] = { clients: [] }; // Initialize with an empty clients array
 console.log('Automatically generated room codes:', initialRoomCode1, initialRoomCode2);
 
 // Read valid credentials from a text file
@@ -155,7 +156,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Handle toggleReadyState event
+    // Handle toggleReadyState event, takes in isReady state from client and returns list of clients and their ready states
     socket.on('toggleReadyState', ({ roomCode, isReady }) => {
         if (!rooms[roomCode]) return;
 
@@ -187,15 +188,15 @@ io.on('connection', (socket) => {
     });
 });
 
-app.get('/generate-room', (req, res) => {
+/*app.get('/generate-room', (req, res) => {
     const roomCode = generateRoomCode();
-    rooms[roomCode] = true; // Store the room code
+    rooms[roomCode] = { clients: [] }; // Initialize with an empty clients array
 
     // Log the room code
     console.log('Generated room code:', roomCode);
 
     res.send({ roomCode });
-});
+});*/
 
 const PORT = process.env.PORT || 3000;
 
