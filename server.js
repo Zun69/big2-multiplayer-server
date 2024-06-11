@@ -5,6 +5,8 @@ const cors = require('cors'); //allow cross origin requests
 
 const app = express();
 const server = http.createServer(app);
+
+const Player = require('./src/js/player.js');
 const GameState = require('./src/js/gameState.js'); // import objects to server
 const Deck = require('./src/js/deck.js')
 
@@ -168,6 +170,37 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
     });
 
+    socket.on('startGame', ({ roomCode }) => {
+        // Create new gameState object here as well, for specfied room
+        const gameState = new GameState();
+
+        // Create empty array that will be filled by four player objects
+        const players = [];
+
+        // Create and shuffle a new deck, then emit it to all clients
+        const deck = new Deck();
+        deck.shuffle(); // Shuffle the deck
+
+        // Retrieve the room clients using the roomCode
+        const roomClients = rooms[roomCode].clients;
+
+        // Iterate over each client in the room
+        roomClients.forEach(client => {
+            // Retrieve the username using the client's socket ID
+            const username = usernameToSocketIdMap.get(client.id);
+            const player = new Player(username);
+            //push player into players array
+
+            // Push the player into the players array
+            players.push(player);
+        });
+
+        // Send the shuffled deck to all clients in the room
+        io.to(roomCode).emit('shuffledDeck', { cards: deck.cards });
+
+        //emit initial gameState with players set with clients usernames and appropriate client id
+    });
+
     // Handle errors in connection logic
     socket.on('error', (err) => {
         console.error('Socket error:', err);
@@ -186,6 +219,8 @@ io.on('connection', (socket) => {
             io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
         }
     });
+
+    
 });
 
 /*app.get('/generate-room', (req, res) => {
