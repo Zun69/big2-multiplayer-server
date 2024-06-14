@@ -1,10 +1,11 @@
-export default class Player{ 
+class Player{ 
     constructor(name, cards = []){ // Player object, which will contain name, cards, wonRound & wonGame & pass status, point tally 
         this.name = name;
         this.cards = cards;
         this.wonRound = false;
         this.wonGame = false;
         this.passed = false;
+        this.clientId = null;
         this.points = 0;
         this.wins = 0;
         this.seconds = 0;

@@ -95,6 +95,11 @@ io.on('connection', (socket) => {
                 // Join the room if the code is valid and the room is not full
                 socket.join(roomCode);
 
+                // Assign host if this is the first client
+                if (numClients === 0) {
+                    rooms[roomCode].host = socket.id;
+                }
+
                 console.log(`Client: ${socket.username} (${socket.id}) joined room ${roomCode}`);
                 const client = { id: socket.id, username: socket.username, isReady: false };
                 rooms[roomCode].clients.push(client);
@@ -137,11 +142,12 @@ io.on('connection', (socket) => {
                 // Retrieve socket IDs in the room
                 const socketIds = Array.from(room);
 
-                // Map socket IDs to usernames and socket IDs
+                // Map socket IDs to usernames and socket IDs, and check if each client is the host
                 const clients = socketIds.map(socketId => {
                     const username = usernameToSocketIdMap.get(socketId);
-                    return { username, socketId };
-                }).filter(client => client.username !== undefined);
+                    const isHost = rooms[roomCode].host === socketId;
+                    return { username, socketId, isHost };
+                }).filter(client => client.username !== undefined); // Filter out undefined usernames
 
                 // Emit the current client list with usernames and socket IDs for the specified room back to the client
                 socket.emit('clientList', clients);
@@ -170,6 +176,7 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
     });
 
+    // only host's start button should be activated
     socket.on('startGame', ({ roomCode }) => {
         // Create new gameState object here as well, for specfied room
         const gameState = new GameState();
@@ -185,20 +192,27 @@ io.on('connection', (socket) => {
         const roomClients = rooms[roomCode].clients;
 
         // Iterate over each client in the room
-        roomClients.forEach(client => {
+        roomClients.forEach((client, index) => {
             // Retrieve the username using the client's socket ID
             const username = usernameToSocketIdMap.get(client.id);
             const player = new Player(username);
-            //push player into players array
+
+            // set player.clientTd to forEach index (should be 0-3)
+            player.clientId = index;
 
             // Push the player into the players array
             players.push(player);
         });
 
+        // set gameState players to players array
+        gameState.players = players;
+
         // Send the shuffled deck to all clients in the room
         io.to(roomCode).emit('shuffledDeck', { cards: deck.cards });
 
-        //emit initial gameState with players set with clients usernames and appropriate client id
+       
+        // Emit the gameState object to all clients in the room
+        io.to(roomCode).emit('initialGameState', { gameState });
     });
 
     // Handle errors in connection logic
@@ -217,6 +231,12 @@ io.on('connection', (socket) => {
         for (let roomCode in rooms) {
             rooms[roomCode].clients = rooms[roomCode].clients.filter(client => client.id !== socket.id);
             io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
+
+            // Remove host if they disconnect
+            if (rooms[roomCode].host === socket.id) {
+                rooms[roomCode].host = null;
+                console.log(`Host disconnected from room ${roomCode}`);
+            }
         }
     });
 
