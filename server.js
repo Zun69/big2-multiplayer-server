@@ -155,6 +155,26 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Event handler to check if the client is the host of a room
+    socket.on('checkHost', ({ roomCode }) => {
+        if (roomCode) {
+            const room = rooms[roomCode];
+            if (room) {
+                // Check if the requesting client's socket ID matches the host socket ID
+                const isHost = room.host === socket.id;
+
+                // Emit the result back to the client
+                socket.emit('hostStatus', { isHost });
+            } else {
+                // Emit an error message if the room does not exist
+                socket.emit('hostStatus', { error: 'Room does not exist' });
+            }
+        } else {
+            // Emit an error message if the room code is not provided
+            socket.emit('hostStatus', { error: 'Room code is required' });
+        }
+    });
+
     // Handle sending messages
     socket.on('sendMessage', ({ roomCode, message }) => {
         const username = usernameToSocketIdMap.get(socket.id);
@@ -178,6 +198,9 @@ io.on('connection', (socket) => {
 
     // only host's start button should be activated
     socket.on('startGame', ({ roomCode }) => {
+        // Notify all clients that the game has started
+        io.to(roomCode).emit('gameStarted');
+        
         // Create new gameState object here as well, for specfied room
         const gameState = new GameState();
 
@@ -209,7 +232,6 @@ io.on('connection', (socket) => {
 
         // Send the shuffled deck to all clients in the room
         io.to(roomCode).emit('shuffledDeck', { cards: deck.cards });
-
        
         // Emit the gameState object to all clients in the room
         io.to(roomCode).emit('initialGameState', { gameState });
