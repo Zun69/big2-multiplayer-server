@@ -196,11 +196,11 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
     });
 
-    // only host's start button should be activated
+    // Start the game for the lobby, populate gameState and generate a deck (only host can trigger this event)
     socket.on('startGame', ({ roomCode }) => {
         // Notify all clients that the game has started
         io.to(roomCode).emit('gameStarted');
-        
+
         // Create new gameState object here as well, for specfied room
         const gameState = new GameState();
 
