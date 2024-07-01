@@ -35,8 +35,8 @@ const usernameToSocketIdMap = new Map();
 // Automatically generate room codes when the server starts
 const initialRoomCode1 = generateRoomCode();
 const initialRoomCode2 = generateRoomCode();
-rooms[initialRoomCode1] = { clients: [] }; // Initialize with an empty clients array (for storing client's ready state)
-rooms[initialRoomCode2] = { clients: [] }; // Initialize with an empty clients array
+rooms[initialRoomCode1] = { clients: [], gameState: null, dealCount: 0 }; // Initialize with an empty clients array and gameState
+rooms[initialRoomCode2] = { clients: [], gameState: null, dealCount: 0 }; 
 console.log('Automatically generated room codes:', initialRoomCode1, initialRoomCode2);
 
 // Read valid credentials from a text file
@@ -82,6 +82,18 @@ io.on('connection', (socket) => {
 
     // Store the mapping of username to socket ID
     usernameToSocketIdMap.set(socket.id, socket.username);
+
+    // Event handler for when a client emits an event to get their username
+    socket.on('getUsername', () => {
+        const username = usernameToSocketIdMap.get(socket.id);
+        if (username) {
+            // Emit the username back to the client
+            socket.emit('username', { username });
+        } else {
+            // Handle the case where the username is not found (optional)
+            socket.emit('username', { error: 'Username not found' });
+        }
+    });
 
     socket.on('joinRoom', (data) => {
         // Extracting roomCode data object
@@ -201,8 +213,9 @@ io.on('connection', (socket) => {
         // Notify all clients that the game has started
         io.to(roomCode).emit('gameStarted');
 
-        // Create new gameState object here as well, for specfied room
+        // Create and assign a new GameState object for the specified room
         const gameState = new GameState();
+        rooms[roomCode].gameState = gameState;
 
         // Create empty array that will be filled by four player objects
         const players = [];
@@ -228,13 +241,32 @@ io.on('connection', (socket) => {
         });
 
         // set gameState players to players array
-        gameState.players = players;
+        rooms[roomCode].gameState.players = players;
 
         // Send the shuffled deck to all clients in the room
         io.to(roomCode).emit('shuffledDeck', { cards: deck.cards });
        
         // Emit the gameState object to all clients in the room
-        io.to(roomCode).emit('initialGameState', { gameState });
+        io.to(roomCode).emit('initialGameState', { gameState: rooms[roomCode].gameState });
+    });
+
+    // Event handler for when a deal is complete
+    socket.on('dealComplete', ({ roomCode }) => {
+        if (rooms[roomCode]) {
+            rooms[roomCode].dealCount++;
+
+            // Check if dealCount reaches 4
+            if (rooms[roomCode].dealCount === 4) {
+                // Emit a dealComplete event to notify clients
+                io.to(roomCode).emit('dealComplete');
+                console.log(`dealComplete emitted for room ${roomCode}`);
+                
+                // Reset dealCount for the next round or game, if needed
+                rooms[roomCode].dealCount = 0;
+            }
+        } else {
+            console.log(`Room ${roomCode} not found`);
+        }
     });
 
     // Handle errors in connection logic
