@@ -240,7 +240,7 @@ io.on('connection', (socket) => {
             players.push(player);
         });
 
-        // set gameState players to players array
+        // initialise roomCode gameState with players
         rooms[roomCode].gameState.players = players;
 
         // Send the shuffled deck to all clients in the room
@@ -251,15 +251,28 @@ io.on('connection', (socket) => {
     });
 
     // Event handler for when a deal is complete
-    socket.on('dealComplete', ({ roomCode }) => {
+    socket.on('dealComplete', ({ roomCode, player }) => {
         if (rooms[roomCode]) {
             rooms[roomCode].dealCount++;
+
+            // Find the player in rooms[roomCode].gameState.players array using clientId and update their cards property
+            const clientPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === player.clientId);
+
+            if(clientPlayer) {
+                // Update the existing player object with received data
+                clientPlayer.cards = player.cards.map(card => ({ rank: card.rank, suit: card.suit }));
+
+                // Optionally, update other properties specific to your application
+                console.log(`Updated player with clientId ${clientPlayer.clientId} in room ${roomCode}`);
+            } else {
+                console.log(`Player with clientId ${player.clientId} not found in room ${roomCode}`);
+            }
 
             // Check if dealCount reaches 4
             if (rooms[roomCode].dealCount === 4) {
                 // Emit a dealComplete event to notify clients
-                io.to(roomCode).emit('dealComplete');
-                console.log(`dealComplete emitted for room ${roomCode}`);
+                io.to(roomCode).emit('allDealsComplete');
+                console.log(`allDealsComplete emitted for room ${roomCode}`);
                 
                 // Reset dealCount for the next round or game, if needed
                 rooms[roomCode].dealCount = 0;
