@@ -35,8 +35,8 @@ const usernameToSocketIdMap = new Map();
 // Automatically generate room codes when the server starts
 const initialRoomCode1 = generateRoomCode();
 const initialRoomCode2 = generateRoomCode();
-rooms[initialRoomCode1] = { clients: [], gameState: null, dealCount: 0 }; // Initialize with an empty clients array and gameState
-rooms[initialRoomCode2] = { clients: [], gameState: null, dealCount: 0 }; 
+rooms[initialRoomCode1] = { clients: [], gameState: null, dealCount: 0, sortHandsCount: 0 }; // Initialize with an empty clients array and gameState
+rooms[initialRoomCode2] = { clients: [], gameState: null, dealCount: 0, sortHandsCount: 0 }; 
 console.log('Automatically generated room codes:', initialRoomCode1, initialRoomCode2);
 
 // Read valid credentials from a text file
@@ -277,6 +277,39 @@ io.on('connection', (socket) => {
                 // Reset dealCount for the next round or game, if needed
                 rooms[roomCode].dealCount = 0;
             }
+        } else {
+            console.log(`Room ${roomCode} not found`);
+        }
+    });
+
+    socket.on('sortHandsComplete', ({ roomCode, player }) => {
+        if (rooms[roomCode]) {
+            rooms[roomCode].sortHandsCount++;
+
+            // Find the player in rooms[roomCode].gameState.players array using clientId and update their cards property
+            const clientPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === player.clientId);
+
+            if(clientPlayer) {
+                // Update the existing player object with received data
+                clientPlayer.cards = player.cards.map(card => ({ rank: card.rank, suit: card.suit }));
+
+                // Optionally, update other properties specific to your application
+                console.log(`Updated player with clientId ${clientPlayer.clientId} in room ${roomCode}`);
+            } else {
+                console.log(`Player with clientId ${player.clientId} not found in room ${roomCode}`);
+            }
+
+            // Check if dealCount reaches 4
+            if (rooms[roomCode].sortHandsCount === 4) {
+
+                // Emit a dealComplete event to notify clients
+                io.to(roomCode).emit('allSortingComplete');
+                console.log(`allSortingComplete emitted for room ${roomCode}`);
+                
+                // Reset dealCount for the next round or game, if needed
+                rooms[roomCode].sortHandsCount = 0;
+            }
+
         } else {
             console.log(`Room ${roomCode} not found`);
         }
