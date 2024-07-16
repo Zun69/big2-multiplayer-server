@@ -35,8 +35,26 @@ const usernameToSocketIdMap = new Map();
 // Automatically generate room codes when the server starts
 const initialRoomCode1 = generateRoomCode();
 const initialRoomCode2 = generateRoomCode();
-rooms[initialRoomCode1] = { clients: [], gameState: null, dealCount: 0, sortHandsCount: 0 }; // Initialize with an empty clients array and gameState
-rooms[initialRoomCode2] = { clients: [], gameState: null, dealCount: 0, sortHandsCount: 0 }; 
+
+// Initialize with an empty clients array and gameState
+rooms[initialRoomCode1] = { 
+    clients: [],
+    gameState: null, 
+    dealCount: 0,
+    sortHandsCount: 0,
+    wonRoundStatusCount: 0,
+    finishedDeckCount: 0
+};
+
+rooms[initialRoomCode2] = { 
+    clients: [],
+    gameState: null, 
+    dealCount: 0,
+    sortHandsCount: 0,
+    wonRoundStatusCount: 0,
+    finishedDeckCount: 0
+}; 
+
 console.log('Automatically generated room codes:', initialRoomCode1, initialRoomCode2);
 
 // Read valid credentials from a text file
@@ -147,7 +165,7 @@ io.on('connection', (socket) => {
     });
 
     // Handle the request for an updated client list
-    socket.on('getClientList', ({ roomCode }) => {
+    socket.on('getClientList', (roomCode) => {
         if (roomCode) {
             const room = io.sockets.adapter.rooms.get(roomCode);
             if (room) {
@@ -168,7 +186,7 @@ io.on('connection', (socket) => {
     });
 
     // Event handler to check if the client is the host of a room
-    socket.on('checkHost', ({ roomCode }) => {
+    socket.on('checkHost', (roomCode) => {
         if (roomCode) {
             const room = rooms[roomCode];
             if (room) {
@@ -188,7 +206,7 @@ io.on('connection', (socket) => {
     });
 
     // Handle sending messages
-    socket.on('sendMessage', ({ roomCode, message }) => {
+    socket.on('sendMessage', (roomCode, message) => {
         const username = usernameToSocketIdMap.get(socket.id);
         if (roomCode && message && username) {
             // Broadcast the message to all clients in the room
@@ -197,7 +215,7 @@ io.on('connection', (socket) => {
     });
 
     // Handle toggleReadyState event, takes in isReady state from client and returns list of clients and their ready states
-    socket.on('toggleReadyState', ({ roomCode, isReady }) => {
+    socket.on('toggleReadyState', (roomCode, isReady) => {
         if (!rooms[roomCode]) return;
 
         const client = rooms[roomCode].clients.find(client => client.id === socket.id);
@@ -209,7 +227,7 @@ io.on('connection', (socket) => {
     });
 
     // Start the game for the lobby, populate gameState and generate a deck (only host can trigger this event)
-    socket.on('startGame', ({ roomCode }) => {
+    socket.on('startGame', (roomCode) => {
         // Notify all clients that the game has started
         io.to(roomCode).emit('gameStarted');
 
@@ -250,17 +268,17 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('initialGameState', { gameState: rooms[roomCode].gameState });
     });
 
-    // Event handler for when a deal is complete
-    socket.on('dealComplete', ({ roomCode, player }) => {
+    // When client has been dealt to, update clients server side cards, and emit allDealsComplete when all 4 clients are done
+    socket.on('dealComplete', ( roomCode, player ) => {
         if (rooms[roomCode]) {
             rooms[roomCode].dealCount++;
-
+            
             // Find the player in rooms[roomCode].gameState.players array using clientId and update their cards property
             const clientPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === player.clientId);
 
             if(clientPlayer) {
                 // Update the existing player object with received data
-                clientPlayer.cards = player.cards.map(card => ({ rank: card.rank, suit: card.suit }));
+                clientPlayer.cards = player.cards;
 
                 // Optionally, update other properties specific to your application
                 console.log(`Updated player with clientId ${clientPlayer.clientId} in room ${roomCode}`);
@@ -270,19 +288,19 @@ io.on('connection', (socket) => {
 
             // Check if dealCount reaches 4
             if (rooms[roomCode].dealCount === 4) {
+                // Reset dealCount for the next round or game, if needed
+                rooms[roomCode].dealCount = 0;
+
                 // Emit a dealComplete event to notify clients
                 io.to(roomCode).emit('allDealsComplete');
                 console.log(`allDealsComplete emitted for room ${roomCode}`);
-                
-                // Reset dealCount for the next round or game, if needed
-                rooms[roomCode].dealCount = 0;
             }
         } else {
-            console.log(`Room ${roomCode} not found`);
+            console.log(`Room ${roomCode} not foundss`);
         }
     });
 
-    socket.on('sortHandsComplete', ({ roomCode, player }) => {
+    socket.on('sortHandsComplete', (roomCode, player) => {
         if (rooms[roomCode]) {
             rooms[roomCode].sortHandsCount++;
 
@@ -301,19 +319,150 @@ io.on('connection', (socket) => {
 
             // Check if dealCount reaches 4
             if (rooms[roomCode].sortHandsCount === 4) {
+                // Reset sortHandsCount for the next round or game, if needed
+                rooms[roomCode].sortHandsCount = 0;
 
-                // Emit a dealComplete event to notify clients
+                // Emit a allSortingComplete event to notify clients
                 io.to(roomCode).emit('allSortingComplete');
                 console.log(`allSortingComplete emitted for room ${roomCode}`);
-                
-                // Reset dealCount for the next round or game, if needed
-                rooms[roomCode].sortHandsCount = 0;
             }
 
         } else {
             console.log(`Room ${roomCode} not found`);
         }
     });
+
+
+    // Return clientId of player who has the 3 of diamonds
+    socket.on('getFirstTurn', (roomCode) => {
+        if(rooms[roomCode]) {
+            const isHost = rooms[roomCode].host === socket.id
+
+            if(isHost){
+                // Iterate through each player in the room
+                for (let player of rooms[roomCode].gameState.players) {
+                    // Check if the player has the specified card
+                    let hasCard = player.cards.some(card => card.rank === 3 && card.suit === 0);
+                    if (hasCard) {
+                        console.log('player found' + player.clientId)
+                        // Update room's gameState's turn to 3d player's clientId
+                        rooms[roomCode].gameState.turn = player.clientId;
+
+                        // Emit the clientId of player with 3d to all clients in the room
+                        io.to(roomCode).emit('firstTurnClientId', player.clientId);
+                    }
+                }
+            }
+        } else {
+            console.log(`Room ${roomCode} not found`);
+        }
+    });
+
+    // Reset player's wonRound status at the beginning of the round
+    socket.on('resetPlayerWonRoundStatus', (roomCode, clientId) => {
+        // Search for players in room using roomCode and clientId
+        if(rooms[roomCode]) {
+            for (let player of rooms[roomCode].gameState.players) {
+                // Reset wonRound status of found player
+                if (player.clientId === clientId) {
+                    player.wonRound = false;
+
+                    // If player status changed, increment status count
+                    rooms[roomCode].wonRoundStatusCount++; 
+                }
+            }
+
+            // Check if wonRoundStatusCount reaches 4
+            if (rooms[roomCode].wonRoundStatusCount === 4) {
+                // Reset wonRoundStatusCount for the next round or game, if needed
+                rooms[roomCode].wonRoundStatusCount = 0;
+
+                // Emit a wonRoundReset event to notify clients and emit updated players
+                io.to(roomCode).emit('wonRoundReset', { players: rooms[roomCode].gameState.players });
+
+                console.log(`resetWonRoundStatus emitted for room ${roomCode}`);
+            }
+
+        } else {
+            console.log(`Room ${roomCode} not found`);
+        }
+    });
+
+    // Let clients know if a player in the room has won a round and emit appropriate event
+    socket.on('checkWonRound', (roomCode) => {
+        if(rooms[roomCode]) {
+            // Check if exactly 3 players have passed
+            if(rooms[roomCode].gameState.players.filter(player => player.passed).length === 3) {
+                for (let player of rooms[roomCode].gameState.players) {
+                    player.passed = false;
+                }
+
+                // Let clients know its okay to start the finishDeckAnimation
+                io.to(roomCode).emit('wonRound', { players: rooms[roomCode].gameState.players } );
+            }
+            // If not then emit a noWonRound event 
+            else {
+                io.to(roomCode).emit('noWonRound');
+            }
+        }
+    });
+
+    // Clients emit this message once all 4 of their finish deck animations have finished
+    socket.on('finishDeckAnimation', (roomCode, wonRoundPlayer, finishedDeck) => {
+        //if roomcode extist, 
+        //ifHost, send clientId of current turn, update gameState's gameDeck, finishedDeck
+        if(rooms[roomCode]) {
+            const isHost = rooms[roomCode].host === socket.id;
+            let emitPlayer;
+            // Increment finishedDeckCount for every client emit
+            rooms[roomCode].finishedDeckCount++;
+
+            if(isHost) {
+                for (let player of rooms[roomCode].gameState.players) {
+                    if(player.clientId == wonRoundPlayer.clientId) {
+                        // Change server side player wonRound property to true and emit to clients in room
+                        player.wonRound = true;
+                        emitPlayer = player;
+                    }
+                }
+
+                // Update room's gameState, remove all cards from gameDeck for the free turn
+                rooms[roomCode].gameState.finishedDeck = finishedDeck;
+                rooms[roomCode].gameState.gameDeck.length = 0;
+            }
+
+            if(rooms[roomCode].finishedDeckCount === 4) {
+                // Reset wonRoundStatusCount for the next round
+                rooms[roomCode].finishedDeckCount = 0;
+
+                // Emit player and gameState.gameDeck so client can update their local equivalents
+                io.to(roomCode).emit('finishDeckComplete', emitPlayer, rooms[roomCode].gameState.gameDeck)
+            }
+        }
+    });
+
+    socket.on('playedHand', (roomCode, hand, clientPlayer, gameDeck, playersFinished) => {
+        if(rooms[roomCode]) {
+            let emitPlayer;
+            // Update gameState to match current client's (latest version because its their turn)
+            rooms[roomCode].gameState.gameDeck = gameDeck;
+            rooms[roomCode].gameState.playersFinished = playersFinished;
+
+            // Update clientId player's cards, and emit back to clients, also emit the cards they played
+            for (let player of rooms[roomCode].gameState.players) {
+                if(player.clientId == clientPlayer.clientId) {
+                    // Update player's server side cards to match client side
+                    player.cards = clientPlayer.cards;
+                    emitPlayer = player;
+                }
+            }
+
+            // Emit hand (to make opponents play that hand), player, and gameState.gameDeck so client can update their local equivalents
+            io.to(roomCode).emit('receivePlayerHand', hand, emitPlayer, rooms[roomCode].gameState.gameDeck, rooms[roomCode].gameState.playersFinished)
+        }
+
+    });
+
 
     // Handle errors in connection logic
     socket.on('error', (err) => {
