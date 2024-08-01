@@ -1,11 +1,12 @@
 class Player{ 
-    constructor(name, cards = []){ // Player object, which will contain name, cards, wonRound & wonGame & pass status, point tally 
+    constructor(name, cards = []){ // Player object, which will contain name, cards, wonRound & finishedGame & pass status, point tally 
         this.name = name;
         this.cards = cards;
         this.wonRound = false;
-        this.wonGame = false;
+        this.finishedGame = false;
         this.passed = false;
         this.clientId = null;
+        this.socketId = null; //unique socketId from server
         this.points = 0;
         this.wins = 0;
         this.seconds = 0;
