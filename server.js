@@ -381,29 +381,16 @@ io.on('connection', (socket) => {
     });
 
     // Reset player's wonRound status at the beginning of the round
-    socket.on('resetPlayerWonRoundStatus', (roomCode, clientId) => {
+    socket.on('resetPlayerWonRoundStatus', (roomCode) => {
         // Search for players in room using roomCode and clientId
         if(rooms[roomCode]) {
-            for (let player of rooms[roomCode].gameState.players) {
-                // Reset wonRound status of found player
-                if (player.clientId === clientId) {
-                    player.wonRound = false;
-
-                    // If player status changed, increment status count
-                    rooms[roomCode].wonRoundStatusCount++; 
-                }
-            }
-
-            // Check if wonRoundStatusCount reaches 4
-            if (rooms[roomCode].wonRoundStatusCount === 4) {
-                // Reset wonRoundStatusCount for the next round or game, if needed
-                rooms[roomCode].wonRoundStatusCount = 0;
+            // Iterate over each client in the room
+            rooms[roomCode].gameState.players.forEach((player) => {
+                player.wonRound = false;
 
                 // Emit a wonRoundReset event to notify clients and emit updated players
-                io.to(roomCode).emit('wonRoundReset', rooms[roomCode].gameState.players);
-
-                console.log(`resetWonRoundStatus emitted for room ${roomCode}`);
-            }
+                io.to(player.socketId).emit('wonRoundReset', player);
+            });
 
         } else {
             console.log(`Room ${roomCode} not found`);
@@ -419,7 +406,10 @@ io.on('connection', (socket) => {
         
             if(isHost){
                 // Check if exactly 3 players have passed
-                if(rooms[roomCode].gameState.players.filter(player => player.passed).length === 3) {
+                const passedPlayers = rooms[roomCode].gameState.players.filter(player => player.passed);
+
+                if (passedPlayers.length === 3) {
+                    console.log("Exactly 3 players have passed");
                     for (let player of rooms[roomCode].gameState.players) {
                         player.passed = false;
                     }
@@ -429,25 +419,27 @@ io.on('connection', (socket) => {
                         // Reset checkWonRoundCount for the next round or game, if needed
                         rooms[roomCode].checkWonRoundCount = 0;
 
-                        // Let clients know its okay to start the finishDeckAnimation
-                        io.to(roomCode).emit('wonRound', rooms[roomCode].gameState.players );
+                        // Let clients know it's okay to start the finishDeckAnimation
+                        io.to(roomCode).emit('wonRound', rooms[roomCode].gameState.players);
+                        console.log("emitted checkWonRound");
                     }
-                }
-                // If not then emit a noWonRound event 
-                else {
+                } else {
+                    // If not then emit a noWonRound event
+                    console.log("reached here");
+                    console.log(checkWonRoundCount);
                     // Check if checkWonRoundCount reaches 4
                     if (rooms[roomCode].checkWonRoundCount === 4) {
+                        console.log("Before emitting noWonRound");
+
+                        // Let clients know it's okay to start the finishDeckAnimation
+                        io.to(roomCode).emit('noWonRound');
+                        console.log("emitted noWonRound");
+
                         // Reset checkWonRoundCount for the next round or game, if needed
                         rooms[roomCode].checkWonRoundCount = 0;
-
-                        // Let clients know its okay to start the finishDeckAnimation
-                        io.to(roomCode).emit('noWonRound');
                     }
-                    
                 }
             }
-            
-            
         }
     });
 
