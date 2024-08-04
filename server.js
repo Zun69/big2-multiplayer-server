@@ -402,42 +402,25 @@ io.on('connection', (socket) => {
         if(rooms[roomCode]) {
             const isHost = rooms[roomCode].host === socket.id;
 
-            rooms[roomCode].checkWonRoundCount++;
-        
-            if(isHost){
-                // Check if exactly 3 players have passed
-                const passedPlayers = rooms[roomCode].gameState.players.filter(player => player.passed);
+            if(isHost) {
+                // Count the number of players who have passed
+                const passedPlayersCount = rooms[roomCode].gameState.players.filter(player => player.passed).length;
 
-                if (passedPlayers.length === 3) {
+                console.log(passedPlayersCount);
+
+                if (passedPlayersCount === 3) {
                     console.log("Exactly 3 players have passed");
-                    for (let player of rooms[roomCode].gameState.players) {
-                        player.passed = false;
-                    }
+                
+                    // Reset the passed status for all players
+                    rooms[roomCode].gameState.players.forEach(player => player.passed = false);
 
-                    // Check if checkWonRoundCount reaches 4
-                    if (rooms[roomCode].checkWonRoundCount === 4) {
-                        // Reset checkWonRoundCount for the next round or game, if needed
-                        rooms[roomCode].checkWonRoundCount = 0;
-
-                        // Let clients know it's okay to start the finishDeckAnimation
-                        io.to(roomCode).emit('wonRound', rooms[roomCode].gameState.players);
-                        console.log("emitted checkWonRound");
-                    }
-                } else {
-                    // If not then emit a noWonRound event
-                    console.log("reached here");
-                    console.log(checkWonRoundCount);
-                    // Check if checkWonRoundCount reaches 4
-                    if (rooms[roomCode].checkWonRoundCount === 4) {
-                        console.log("Before emitting noWonRound");
-
-                        // Let clients know it's okay to start the finishDeckAnimation
-                        io.to(roomCode).emit('noWonRound');
-                        console.log("emitted noWonRound");
-
-                        // Reset checkWonRoundCount for the next round or game, if needed
-                        rooms[roomCode].checkWonRoundCount = 0;
-                    }
+                    // Let clients know it's okay to start the finishDeckAnimation
+                    io.to(roomCode).emit('wonRound');
+                    console.log("emitted checkWonRound");
+                }
+                else {
+                    io.to(roomCode).emit('noWonRound');
+                    console.log("emitted noWonRound");
                 }
             }
         }
