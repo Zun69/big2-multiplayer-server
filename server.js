@@ -409,8 +409,6 @@ io.on('connection', (socket) => {
                 console.log(passedPlayersCount);
 
                 if (passedPlayersCount === 3) {
-                    console.log("Exactly 3 players have passed");
-                
                     // Reset the passed status for all players
                     rooms[roomCode].gameState.players.forEach(player => player.passed = false);
 
@@ -432,31 +430,21 @@ io.on('connection', (socket) => {
         //ifHost, send clientId of current turn, update gameState's gameDeck, finishedDeck
         if(rooms[roomCode]) {
             const isHost = rooms[roomCode].host === socket.id;
-            let emitPlayer;
 
             if(isHost) {
-                for (let player of rooms[roomCode].gameState.players) {
-                    if(player.clientId == wonRoundPlayer.clientId) {
-                        // Change server side player wonRound property to true and emit to clients in room
-                        player.wonRound = true;
-                        emitPlayer = player;
+                const serverPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === wonRoundPlayer.clientId);
 
-                        // Increment finishedDeckCount if client found
-                        rooms[roomCode].finishedDeckCount++;
-                    }
+                if (serverPlayer) {
+                    console.log("wonRound player found");
+                    serverPlayer.wonRound = true;
+
+                    // Update room's gameState, remove all cards from gameDeck for the free turn
+                    rooms[roomCode].gameState.finishedDeck = finishedDeck;
+                    rooms[roomCode].gameState.gameDeck.length = 0;
+
+                    // Emit player and gameState.gameDeck so client can update their local equivalents
+                    io.to(roomCode).emit('finishDeckComplete', serverPlayer, rooms[roomCode].gameState.gameDeck)
                 }
-
-                // Update room's gameState, remove all cards from gameDeck for the free turn
-                rooms[roomCode].gameState.finishedDeck = finishedDeck;
-                rooms[roomCode].gameState.gameDeck.length = 0;
-            }
-
-            if(rooms[roomCode].finishedDeckCount === 4) {
-                // Reset wonRoundStatusCount for the next round
-                rooms[roomCode].finishedDeckCount = 0;
-
-                // Emit player and gameState.gameDeck so client can update their local equivalents
-                io.to(roomCode).emit('finishDeckComplete', emitPlayer, rooms[roomCode].gameState.gameDeck)
             }
         }
     });
