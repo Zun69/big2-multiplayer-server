@@ -400,13 +400,12 @@ io.on('connection', (socket) => {
     // Let clients know if a player in the room has won a round and emit appropriate event
     socket.on('checkWonRound', (roomCode) => {
         if(rooms[roomCode]) {
-            const isHost = rooms[roomCode].host === socket.id;
+            rooms[roomCode].checkWonRoundCount++;
 
-            if(isHost) {
+            if(rooms[roomCode].checkWonRoundCount === 4) {
                 // Count the number of players who have passed
                 const passedPlayersCount = rooms[roomCode].gameState.players.filter(player => player.passed).length;
-
-                console.log(passedPlayersCount);
+                rooms[roomCode].checkWonRoundCount = 0;
 
                 if (passedPlayersCount === 3) {
                     // Reset the passed status for all players
@@ -429,9 +428,9 @@ io.on('connection', (socket) => {
         //if roomcode extist, 
         //ifHost, send clientId of current turn, update gameState's gameDeck, finishedDeck
         if(rooms[roomCode]) {
-            const isHost = rooms[roomCode].host === socket.id;
+            rooms[roomCode].finishedDeckCount++;
 
-            if(isHost) {
+            if (rooms[roomCode].finishedDeckCount === 4) {
                 const serverPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === wonRoundPlayer.clientId);
 
                 if (serverPlayer) {
@@ -441,6 +440,7 @@ io.on('connection', (socket) => {
                     // Update room's gameState, remove all cards from gameDeck for the free turn
                     rooms[roomCode].gameState.finishedDeck = finishedDeck;
                     rooms[roomCode].gameState.gameDeck.length = 0;
+                    rooms[roomCode].finishedDeckCount = 0;
 
                     // Emit player and gameState.gameDeck so client can update their local equivalents
                     io.to(roomCode).emit('finishDeckComplete', serverPlayer, rooms[roomCode].gameState.gameDeck)
@@ -561,25 +561,31 @@ io.on('connection', (socket) => {
     // Receive current turn's player and check if they have 0 cards, if yes then update server gameState accordingly
     socket.on('checkIfPlayerHasFinished', (roomCode, clientPlayer, clientPlayersFinished) => {
         if(rooms[roomCode]) {
-            const isHost = rooms[roomCode].host === socket.id;
-            let emitPlayer;
-            let losingPlayer;
-
             // increment count for every client emit
             rooms[roomCode].checkPlayersFinishedCount++;
 
-            // Only the host's emitted updates will update the server's room gamestate
-            if(isHost) {
-                if(clientPlayer.numberOfCards === 0) {
-                    // Find the player in rooms[roomCode].gameState.players array using clientId and update their cards property
-                    const serverPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === clientPlayer.clientId);
+            // Only the last client's emitted updates will update the server's room gamestate
+            if(rooms[roomCode].checkPlayersFinishedCount === 4) {
+                console.log("reached checkIfPlayerHasFinished")
+                // Reset checkPlayersFinishedCount for the next round or game, if needed
+                rooms[roomCode].checkPlayersFinishedCount = 0;
 
-                    serverPlayer.numberOfCards = clientPlayer.numberOfCards;
-                    serverPlayer.finishedGame = true;
-                    emitPlayer = serverPlayer;
+                console.log("client playersFinishedLength: " + clientPlayersFinished.length)
 
-                    // Add clientId of player who has finished into server room's playerFinished array
-                    rooms[roomCode].gameState.playersFinished.push(serverPlayer.clientId);
+                if (clientPlayersFinished.length >= 1) {
+                    // update room's playersFinished array with latest client version
+                    rooms[roomCode].gameState.playersFinished = clientPlayersFinished;
+
+                    for (let clientId of clientPlayersFinished) {
+                        // Find the player in rooms[roomCode].gameState.players array using clientId and update their cards property
+                        let serverPlayer = rooms[roomCode].gameState.players.find(p => p.clientId === clientId);
+
+                        if (serverPlayer) {
+                            console.log("finished game player found: " + clientId);
+                            serverPlayer.cards = clientPlayer.cards;
+                            serverPlayer.finishedGame = true;
+                        }
+                    }
                 }
 
                 // If client side playersFinished array length is 3 
@@ -598,12 +604,6 @@ io.on('connection', (socket) => {
 
                     rooms[roomCode].gameState.playersFinished.push(losingPlayerClientId);
                 }
-            }
-
-            // Check if checkPlayersFinishedCount reaches 4
-            if (rooms[roomCode].checkPlayersFinishedCount === 4) {
-                // Reset checkPlayersFinishedCount for the next round or game, if needed
-                rooms[roomCode].checkPlayersFinishedCount = 0;
 
                 // If losing player is in playersFinished array, emit array and clientId of losing player, to let clients know game is over
                 if(rooms[roomCode].gameState.playersFinished.length === 4) {
@@ -612,7 +612,7 @@ io.on('connection', (socket) => {
                 }
                 // Else if 1-3 clients have finished the game
                 else if(rooms[roomCode].gameState.playersFinished.length >= 1 && rooms[roomCode].gameState.playersFinished.length <= 3) {
-                    io.to(roomCode).emit('gameHasNotFinished', emitPlayer, rooms[roomCode].gameState.playersFinished);
+                    io.to(roomCode).emit('gameHasNotFinished', rooms[roomCode].gameState.playersFinished);
                     console.log(`gameHasNotFinished emitted for room ${roomCode}`);
                 }
                 // Else no clients have finished the game
@@ -645,7 +645,7 @@ io.on('connection', (socket) => {
                 rooms[roomCode].finishedGameCount = 0;
 
                 // Emit player and gameState.gameDeck so client can update their local equivalents
-                io.to(roomCode).emit('finishGameAnimationComplete', rooms[roomCode].gameState.gameDeck, rooms[roomCode].gameState.finishedDeck)
+                io.to(roomCode).emit('finishGameAnimationComplete')
             }
         }
     });
