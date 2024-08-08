@@ -166,7 +166,23 @@ io.on('connection', (socket) => {
             socket.emit('errorMessage', 'Invalid room code');
         }
     });
+
+    socket.on('leaveRoom', (roomCode) => {
+        if (rooms[roomCode]) {
+            const clientIndex = rooms[roomCode].clients.findIndex(client => client.id === socket.id);
+            if (clientIndex !== -1) {
+                rooms[roomCode].clients.splice(clientIndex, 1);
+            }
     
+            // Notify other clients in the room about the updated client list
+            io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
+    
+            // Leave the room
+            socket.leave(roomCode);
+    
+            console.log(`Client: ${socket.username} (${socket.id}) left room ${roomCode}`);
+        }
+    });
 
     // event listener for getting available rooms
     socket.on('getAvailableRooms', () => {
@@ -795,8 +811,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
-
-//TO DO
-//when player joins assign an id to them
-
-//deal funciton = shuffle the deck on the server and deal the cards to the players, emit a message once all players are confirmed to have all cards
