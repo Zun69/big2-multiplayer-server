@@ -1,16 +1,18 @@
 class GameState {
-    constructor(players, gameDeck, lastHand, turn, lastValidHand, finishedDeck, playersFinished, playedHistory, playedHand, losingPlayer) {
-      this.players = players;
-      this.gameDeck = gameDeck;
-      this.lastHand = lastHand;
-      this.turn = turn;
-      this.lastValidHand = lastValidHand;
-      this.finishedDeck = finishedDeck;
-      this.playersFinished = playersFinished;
-      this.playedHistory = playedHistory;
-      this.playedHand = playedHand; // Storing last played hand length
-      this.losingPlayer = losingPlayer; // Store clientId of player that loses
-    }
+  constructor() {
+    // minimal constructor + explicit setters, so I can just make a new gamestate without filling in constructor in server.js
+    this.players = [];
+    this.gameDeck = [];
+    this.lastHand = [];
+    this.turn = null;
+    this.lastValidHand = null;
+    this.finishedDeck = [];
+    this.playersFinished = [];
+    this.playedHistory = [];
+    this.playedHand = null;
+    this.losingPlayer = null;
+    this.lastWinner = null;
+    this.isFirstMove = true;
   }
-  
-  module.exports = GameState;
+}
+module.exports = GameState;
