@@ -380,7 +380,18 @@ io.on('connection', (socket) => {
         state.playedHand = cards.length;
         state.playedHistory = state.playedHistory || [];
         state.playedHistory.push({ by: me, cards });
-        state.players.forEach(p => { p.passed = false; }); // reset passes on a valid play
+        
+        // reset passes on a valid play
+        state.players.forEach(p => { p.passed = false; });
+
+        // start a fresh per-trick pass tracker
+        // finished seats (with zero cards) are auto-counted as "already passed"
+        state.passTracker = new Set();
+        for (let i = 0; i < state.players.length; i++) {
+            if (i === me) continue; // the last winner never needs to pass to clear
+            const hasCards = (state.players[i]?.cards?.length || 0) > 0;
+            if (!hasCards) state.passTracker.add(i);
+        }
 
         if (state.isFirstMove) state.isFirstMove = false;
 
@@ -391,7 +402,7 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('cardsPlayed', {
             verdict: 'validated',
             type: 'play',
-            clientId: me,
+            clientId: player.clientId,
             players: publicisePlayers(state),
             cards,
             positions,
@@ -666,27 +677,6 @@ io.on('connection', (socket) => {
         }));
     }
 
-    // Decide if the current trick should be cleared based on passes from ACTIVE players.
-    // Only players with cards (> 0) are “active”.
-    //A trick clears when ALL active players except the last winner have passed,
-    //i.e. when activePasses >= (activePlayers - 1).
-    function computePassClear(state) {
-        const active = state.players.filter(p => (p.cards?.length || 0) > 0);
-        const activeCount  = active.length;
-        const activePasses = active.filter(p => p.passed).length;
-        const neededToClear = Math.max(0, activeCount - 1);
-        const hasTarget =
-            Array.isArray(state.lastValidHand) && state.lastValidHand.length > 0;
-
-        return {
-            activeCount,
-            activePasses,
-            neededToClear,
-            hasTarget,
-            shouldClear: hasTarget && activePasses >= neededToClear
-        };
-    }
-
     socket.removeAllListeners('passTurn'); // avoid dupes if hot-reloading
     socket.on('passTurn', (roomCode) => {
         const room = rooms[roomCode];
@@ -696,53 +686,64 @@ io.on('connection', (socket) => {
         const me = getPlayerIndex(rooms, roomCode, socket.id);
         if (me === -1 || state.turn !== me) return; // ignore out-of-turn
 
-        const player = state.players[me];
+        // 1) mark this player as passed (UI + server bookkeeping)
+        const meId = state.players[me]?.clientId;
+        state.players[me].passed = true;
 
-        // mark this player as passed
-        player.passed = true;
+        // 2) make sure a per-trick pass tracker exists, then record this distinct passer
+        if (!state.passTracker) state.passTracker = new Set();
+        state.passTracker.add(me);
 
-        // NEW: dynamic pass-to-clear check (only counts players who still have cards)
-        const { shouldClear } = computePassClear(state);
+        // 3) only clear if there is a target on the table
+        const hasTarget = Array.isArray(state.lastValidHand) && state.lastValidHand.length > 0;
 
-        if (shouldClear) {
-        state.finishedDeck = state.finishedDeck || [];
-        if (state.gameDeck && state.gameDeck.length) {
-            state.finishedDeck.push(...state.gameDeck);
-        }
+        if (hasTarget && state.passTracker.size >= 3) {
+            // --- clear the trick ---
+            state.finishedDeck = state.finishedDeck || [];
+            if (state.gameDeck && state.gameDeck.length) {
+            // archive the table pile; client will animate into finished pile after ack
+            state.finishedDeck.push(state.gameDeck);
+            }
 
-        // clear current trick & target
-        state.gameDeck = [];
-        state.lastValidHand = [];
+            // wipe the current target
+            state.gameDeck = [];
+            state.lastValidHand = [];
 
-        // reset per-trick flags and wonRound flags
-        state.players.forEach(p => { p.passed = false; p.wonRound = false; });
+            // reset per-trick flags
+            state.players.forEach(p => { p.passed = false; p.wonRound = false; });
 
-        // leader is lastWinner (or current seat as fallback); skip if they finished
-        let leader = state.lastWinner ?? me;
-        if ((state.players[leader]?.cards?.length ?? 0) === 0) {
+            // leader = lastWinner (or fallback to current seat); if they finished, pick next active
+            let leader = (typeof state.lastWinner === 'number') ? state.lastWinner : me;
+            if ((state.players[leader]?.cards?.length ?? 0) === 0) {
             leader = nextActivePlayer(state, leader);
-        }
+            }
 
-        state.players[leader].wonRound = true;
-        state.turn = leader;
+            state.players[leader].wonRound = true;
+            state.turn = leader;
 
-        io.to(roomCode).emit('wonRound', {
+            // new trick → throw away the tracker until the next valid play seeds it again
+            state.passTracker = null;
+
+            io.to(roomCode).emit('wonRound', {
             players: publicisePlayers(state),
             lastValidHand: state.lastValidHand,
             type: 'passWonRound',
-        });
-        return;
+            });
+            return;
         }
 
-        // normal pass → next active player
-        state.turn = nextActivePlayer(state, me);
+        // --- normal pass → advance to the next active (skips finished seats) ---
+        const nextIdx = nextActivePlayer(state, me);
+        state.turn = nextIdx;
+
         io.to(roomCode).emit('passedTurn', {
-        type: 'pass',
-        passedBy: me,
-        nextTurn: state.turn,
-        lastValidHand: state.lastValidHand,
+            type: 'pass',
+            passedBy: meId,                                      // client expects a clientId here
+            nextTurn: state.players[nextIdx]?.clientId,          // …and a clientId here
+            lastValidHand: state.lastValidHand,
         });
     });
+
 
     socket.on('completedGameLoop', (roomCode) => {
         if(rooms[roomCode]) {
