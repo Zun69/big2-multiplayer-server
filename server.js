@@ -131,6 +131,89 @@ function buildVisualDeckForSeat(hand, seatIndex /* 0..3 */) {
   return visual;
 }
 
+
+// Start the game for the lobby, populate gameState and generate a deck
+function startGameForRoom(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    // prevent double-starts
+    if (room.gameState) return;
+
+    // Create a new GameState object for this room
+    const gameState = new GameState();
+    room.gameState = gameState;
+    room.playersFinished = [];
+    room.losingPlayer = null;
+
+    // Build & shuffle deck, deal, assign players, work out first turn
+    const deck = new Deck();
+    deck.shuffle();
+
+    const hands = [[], [], [], []];
+    for (let i = 0; i < 52; i++) hands[i % 4].push(deck.cards[i]);
+
+    room.gameState.players = room.clients.map((client, idx) => ({
+        clientId: idx,
+        socketId: client.id,
+        username: client.username,
+        cards: hands[idx],
+        passed: false,
+        finishedGame: false,
+        wonRound: false
+    }));  // matches your current shape. :contentReference[oaicite:1]{index=1}
+
+    // hostClientId + first turn (3♦) + broadcast start
+    const hostSocketId = rooms[roomCode].host;
+    const hostPlayer = room.gameState.players.find(p => p.socketId === hostSocketId);
+    const hostClientId = hostPlayer ? hostPlayer.clientId : 0;
+
+    const firstPlayer = room.gameState.players.find(p =>
+        p.cards.some(c => c.rank === 3 && c.suit === 0)
+    );
+    if (firstPlayer) {
+        room.gameState.turn = firstPlayer.clientId;
+        io.to(roomCode).emit('firstTurnClientId', firstPlayer.clientId);
+    }
+
+    io.to(roomCode).emit('gameStarted'); // your client already waits on this to leave lobby. :contentReference[oaicite:2]{index=2}
+
+    const playersSnapshot = room.gameState.players.map(p => ({
+        clientId: p.clientId, socketId: p.socketId, username: p.username
+    }));
+    io.to(roomCode).emit('playersSnapshot', { players: playersSnapshot });
+    io.to(roomCode).emit('hostClientId', hostClientId);
+
+    room.gameState.players.forEach((player, idx) => {
+        const visualDeck = buildVisualDeckForSeat(player.cards, idx);
+        io.to(player.socketId).emit('visualDealDeck', { cards: visualDeck, clientId: player.clientId });
+    });
+}
+
+function resetRoomForLobby(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    // clear game objects/state
+    room.gameState = null;
+    room.playersFinished = [];
+    room.losingPlayer = null;
+
+    // reset all the per-round counters you use
+    room.dealCount = 0;
+    room.sortHandsCount = 0;
+    room.playHandAckCount = 0;
+    room.finishedDeckCount = 0;
+    room.resetPassedCount = 0;
+    room.sortAfterTurnCount = 0;
+    room.checkPlayersFinishedCount = 0;
+    room.finishedGameCount = 0;
+    room.completedGameLoopCount = 0;
+
+    // clear any “starting” guard you use
+    room._starting = false;
+}
+
 function emitGameCompletionState(roomCode) {
   const room = rooms[roomCode];
   if (!room || !room.gameState) return;
@@ -152,10 +235,14 @@ function emitGameCompletionState(roomCode) {
 
   // finished.length === 3 → determine loser (the only player with cards left)
   const survivor = state.players.find(p => (p.cards?.length || 0) > 0);
-  const losingPlayer = survivor ? survivor.clientId : null;
+  const losingPlayer = survivor ? survivor.username : null;
   room.losingPlayer = losingPlayer;
+  console.log("Losing player" + losingPlayer);
 
-  io.to(roomCode).emit('gameHasFinished', finished, losingPlayer);
+  // Add loser as the last element in finished array
+  const allFinished = [...finished, losingPlayer];
+
+  io.to(roomCode).emit('gameHasFinished', allFinished, losingPlayer);
 }
 
 // io.use middleware intercepts every connection attempt before it reaches the io.on connection event handler. returns next if client has valid credentials, else auth fails
@@ -194,40 +281,62 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('joinRoom', (data) => {
-        // Extracting roomCode data object
-        const { roomCode } = data;
-
-        if (roomCode && rooms[roomCode]) {
-            const room = io.sockets.adapter.rooms.get(roomCode);
-            const numClients = room ? room.size : 0;
-
-            if (numClients < MAX_CLIENTS_PER_ROOM) {
-                // Join the room if the code is valid and the room is not full
-                socket.join(roomCode);
-
-                // Assign host if this is the first client
-                if (numClients === 0) {
-                    rooms[roomCode].host = socket.id;
-                }
-
-                console.log(`Client: ${socket.username} (${socket.id}) joined room ${roomCode}`);
-                const client = { id: socket.id, username: socket.username, isReady: false };
-                rooms[roomCode].clients.push(client);
-                
-                // Notify the client that joining was successful
-                socket.emit('joinedRoom');
-
-                // Broadcast the updated client list to the room
-                io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
-            } else {
-                // Send an error message if the room is full
-                socket.emit('errorMessage', 'Room is full');
-            }
-        } else {
-            // Send an error message if the code is invalid
+    socket.on('joinRoom', ({ roomCode }) => {
+        if (!roomCode || !rooms[roomCode]) {
             socket.emit('errorMessage', 'Invalid room code');
+            return;
         }
+
+        // Count live sockets BEFORE joining
+        const preSet = io.sockets.adapter.rooms.get(roomCode);
+        const preCount = preSet ? preSet.size : 0;
+
+        // If the room is currently empty but still has a gameState from last round, reset it.
+        if (preCount === 0 && rooms[roomCode].gameState) {
+            console.log(`[joinRoom] room ${roomCode} reopening empty; resetting stale gameState.`);
+            resetRoomForLobby(roomCode);
+            // also clear any stale clients list since nobody is connected yet
+            rooms[roomCode].clients = [];
+            rooms[roomCode].host = null;
+        }
+
+        // Capacity guard
+        if (preCount >= MAX_CLIENTS_PER_ROOM) {
+            socket.emit('errorMessage', 'Room is full');
+            return;
+        }
+
+        // Join first so this socket is in the live set
+        socket.join(roomCode);
+
+        // Recompute live sockets
+        const liveSet = io.sockets.adapter.rooms.get(roomCode) || new Set();
+
+        const room = rooms[roomCode];
+        const clients = room.clients;
+
+        // Prune any stored clients not actually connected
+        for (let i = clients.length - 1; i >= 0; i--) {
+            if (!liveSet.has(clients[i].id)) clients.splice(i, 1);
+        }
+
+        // Add current socket if missing
+        if (!clients.some(c => c.id === socket.id)) {
+            clients.push({ id: socket.id, username: socket.username, isReady: false });
+        }
+
+        // Assign host if none or host is not live
+        if (!room.host || !liveSet.has(room.host)) {
+            room.host = clients.find(c => liveSet.has(c.id))?.id || socket.id;
+        }
+
+        console.log(`Client: ${socket.username} (${socket.id}) joined room ${roomCode}`);
+
+        socket.emit('joinedRoom');
+
+        // Send updated ready state isHost for ui reasons, might get rid of host later
+        const payload = clients.map(c => ({ ...c, isHost:c.id === room.host }));
+        io.to(roomCode).emit('updateReadyState', payload);
     });
 
     // Client will emit this event when they click go back in the room's lobby menu
@@ -314,15 +423,30 @@ io.on('connection', (socket) => {
 
     // Handle toggleReadyState event, takes in isReady state from client and returns list of clients and their ready states
     socket.on('toggleReadyState', (roomCode, isReady) => {
-        if (!rooms[roomCode]) return;
+        const room = rooms[roomCode];
+        if (!room) return;
 
-        const client = rooms[roomCode].clients.find(client => client.id === socket.id);
-        if (client) {
-            client.isReady = isReady;
+        const me = room.clients.find(c => c.id === socket.id);
+        if (me) me.isReady = isReady;
+
+        io.to(roomCode).emit('updateReadyState', room.clients);
+
+        // robust 4/4 check
+        const roomSet = io.sockets.adapter.rooms.get(roomCode) || new Set();
+        if (roomSet.size !== 4) return;
+
+        // count only currently connected clients
+        const live = new Set(roomSet);
+        const liveClients = room.clients.filter(c => live.has(c.id));
+
+        const allReady = liveClients.length === 4 && liveClients.every(c => c.isReady);
+        if (allReady && !room.gameState && !room._starting) {
+            room._starting = true;
+            startGameForRoom(roomCode); // start new game for room with fresh gameState
+            setTimeout(() => { room._starting = false; }, 1000);
         }
-
-        io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
     });
+
 
     // === authoritative play (server validates) ===
     socket.removeAllListeners('playCards');
@@ -413,7 +537,7 @@ io.on('connection', (socket) => {
         // inside your play/turn handling on the server
         if (player.cards.length === 0 && !player.finishedGame) {
             player.finishedGame = true;
-            room.playersFinished.push(player.clientId);
+            room.playersFinished.push(player.username);
 
             io.to(roomCode).emit("playerFinished", {
                 clientId: player.clientId,
@@ -437,81 +561,6 @@ io.on('connection', (socket) => {
             io.to(roomCode).emit('allHandAckComplete'); 
         }
     });
-
-    // Start the game for the lobby, populate gameState and generate a deck (only host can trigger this event)
-    socket.on('startGame', (roomCode) => {
-        const room = rooms[roomCode];
-        if (!room) return;
-
-        // Create a new GameState object for this room, already has explicit setters
-        const gameState = new GameState();
-        room.gameState = gameState;
-        room.playersFinished = [];
-        room.losingPlayer = null;
-
-        // Build & shuffle deck
-        const deck = new Deck();
-        deck.shuffle();
-
-        // Deal 13 cards each
-        const hands = [[], [], [], []];
-        for (let i = 0; i < 52; i++) {
-            hands[i % 4].push(deck.cards[i]);
-        }
-
-        // Assign players from room.clients
-        room.gameState.players = room.clients.map((client, idx) => ({
-            clientId: idx,          
-            socketId: client.id,
-            username: client.username,
-            cards: hands[idx],
-            passed: false,
-            finishedGame: false,
-            wonRound: false
-        }));
-
-        // Who is the host in this room?
-        const hostSocketId = rooms[roomCode].host;
-        // Find that host in the players array to get their clientId (0..3)
-        const hostPlayer = room.gameState.players.find(p => p.socketId === hostSocketId);
-        const hostClientId = hostPlayer ? hostPlayer.clientId : 0;
-
-        // Determine first turn (player with 3♦: rank=3, suit=0)
-        const firstPlayer = room.gameState.players.find(p =>
-            p.cards.some(c => c.rank === 3 && c.suit === 0)
-        );
-        if (firstPlayer) {
-            room.gameState.turn = firstPlayer.clientId;
-            io.to(roomCode).emit('firstTurnClientId', firstPlayer.clientId);
-        }
-
-        // Tell clients we're starting BEFORE sending their decks
-        io.to(roomCode).emit('gameStarted');
-
-        // Build the public snapshot (no card data)
-        const playersSnapshot = room.gameState.players.map(p => ({
-            clientId: p.clientId,
-            socketId: p.socketId,
-            username: p.username
-        }));
-
-        io.to(roomCode).emit('playersSnapshot', { players: playersSnapshot });
-
-        // Broadcast the host's clientId to all clients
-        io.to(roomCode).emit('hostClientId', hostClientId);
-
-        // Send each player their private hand
-        room.gameState.players.forEach((player, idx) => {
-            const hand = player.cards;
-            const visualDeck = buildVisualDeckForSeat(hand, idx);
-
-            io.to(player.socketId).emit('visualDealDeck', {
-                cards: visualDeck,       // not "deck"
-                clientId: player.clientId
-            });
-        });
-    });
-
 
     // When client has been dealt to, update clients server side cards, and emit allDealsComplete when all 4 clients are done
     socket.on('dealComplete', ( roomCode, player ) => {
@@ -661,6 +710,7 @@ io.on('connection', (socket) => {
         if (room.finishedGameCount === 4) {
             room.finishedGameCount = 0;
             io.to(roomCode).emit('finishGameAnimationComplete');
+            resetRoomForLobby(roomCode); // reset GameLobby state, would have to log results into db before this
             console.log(`[${roomCode}] all 4 clients finished game animations`);
         }
     });
@@ -762,18 +812,7 @@ io.on('connection', (socket) => {
 
 
     socket.on('processResults', (roomCode, clientResults) => {
-        if(rooms[roomCode]) {
-            rooms[roomCode].completedGameLoopCount++;
-
-            if(rooms[roomCode].completedGameLoopCount++) {
-                // Reset wonRoundStatusCount for the next round
-                rooms[roomCode].completedGameLoopCount = 0;
-
-                // Emit lastHand of server that the host updated 
-                io.to(roomCode).emit('allCompletedGameLoop');
-                console.log(`completedGameLoop emitted for room ${roomCode}`);
-            }
-        }
+        
     });
 
     // Handle errors in connection logic
@@ -783,36 +822,23 @@ io.on('connection', (socket) => {
 
     // Listen for disconnect event
     socket.on('disconnect', () => {
-        // Log the disconnection
-        console.log(`Client disconnected: ${socket.username} (${socket.id})`);
-        
-        // Remove the mapping of username to socket ID when a client disconnects
-        usernameToSocketIdMap.delete(socket.username);
-        
-        for (let roomCode in rooms) {
-            rooms[roomCode].clients = rooms[roomCode].clients.filter(client => client.id !== socket.id);
-            io.to(roomCode).emit('updateReadyState', rooms[roomCode].clients);
+        usernameToSocketIdMap.delete(socket.id);
 
-            // Remove host if they disconnect
-            if (rooms[roomCode].host === socket.id) {
-                rooms[roomCode].host = null;
-                console.log(`Host disconnected from room ${roomCode}`);
+        for (const roomCode in rooms) {
+            const room = rooms[roomCode];
+            const before = room.clients.length;
+            room.clients = room.clients.filter(c => c.id !== socket.id);
+
+            // if host left, pick the first remaining as new host
+            if (room.host === socket.id) {
+                room.host = room.clients[0]?.id ?? null;
+            }
+            if (room.clients.length !== before) {
+                io.to(roomCode).emit('updateReadyState', room.clients);
             }
         }
     });
-
-    
 });
-
-/*app.get('/generate-room', (req, res) => {
-    const roomCode = generateRoomCode();
-    rooms[roomCode] = { clients: [] }; // Initialize with an empty clients array
-
-    // Log the room code
-    console.log('Generated room code:', roomCode);
-
-    res.send({ roomCode });
-});*/
 
 const PORT = process.env.PORT || 3000;
 
